@@ -566,7 +566,7 @@
       return;
     }
 
-    const artifact = await fetchOnlineArtifactBlob(settings, entry, artifactPath.value);
+    const artifact = await fetchOnlineArtifactBlob(settings, entry, artifactPath.value, manifestText.value);
     if (generation !== onlineDatasetGeneration) return;
     if (!artifact.ok) {
       error = artifact.error;

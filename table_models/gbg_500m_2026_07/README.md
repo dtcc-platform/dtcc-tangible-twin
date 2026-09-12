@@ -82,10 +82,10 @@ DTCC_UPLOAD_URL=https://upload.example DTCC_UPLOAD_TOKEN=... \
 | Set | Dataset ids | Purpose |
 |---|---|---|
 | default | `calibration_grid`, `smoke_slice`, `smoke_streamlines`, `smoke_streamlines_mp4`, `building_footprints`, `roads`, `space_syntax`, `deso_population`, `weather_temperature`, `air_quality_no2`, `hydrology_discharge`, `ocean_sea_level`, `transit_vehicles_buses`, `trees`, `terrain_surface_mesh`, `city_surface_mesh` | Canonical table media packages for every current `dtcc-core` demo story, rendered against the printed-model bounds. |
-| `dev` | `smoke_slice_geojson`, `smoke_streamlines_geojson`, `smoke_field_vtu`, `smoke_field_pb` | Raw/debug smoke artifacts for local package inspection and serializer checks. |
+| `dev` | `smoke_slice_geojson`, `smoke_streamlines_geojson`, `smoke_field_vtu`, `smoke_field_dtcc` | Raw/debug smoke artifacts for local package inspection and serializer checks. |
 | `credentialed` | no additional dataset ids; default `transit_vehicles_buses` requires `VASTTRAFIK_AUTHENTICATION_KEY` | Credential checks for the default live-bus layer. |
-| `simulation` | `traffic_simulation_pb` | dtcc-sim traffic assignment context when `dtcc_sim.datasets` is available. |
-| `expensive` | `urban_heat_simulation_xdmf`, `urban_wind_simulation_pb` | Manual solver entries for local inspection and artifact experiments. |
+| `simulation` | `traffic_simulation_dtcc` | dtcc-sim traffic assignment context when `dtcc_sim.datasets` is available. |
+| `expensive` | `urban_heat_simulation_xdmf`, `urban_wind_simulation_dtcc` | Manual solver entries for local inspection and artifact experiments. |
 
 Every entry in `datasets.yaml` declares an internal tier, table role, inclusion reason,
 export format, filename, media type, data kind, CRS when relevant, and publish
@@ -104,7 +104,7 @@ profile deploys concrete table artifacts.
 | Dataset id | Demo or reason |
 |---|---|
 | `calibration_grid` | `dtcc-core/demos/calibration_grid.py` |
-| `smoke_field_vtu`, `smoke_field_pb`, `smoke_slice_geojson`, `smoke_streamlines_geojson`, `smoke_slice`, `smoke_streamlines`, `smoke_streamlines_mp4` | `dtcc-core/demos/smoke.py` |
+| `smoke_field_vtu`, `smoke_field_dtcc`, `smoke_slice_geojson`, `smoke_streamlines_geojson`, `smoke_slice`, `smoke_streamlines`, `smoke_streamlines_mp4` | `dtcc-core/demos/smoke.py` |
 | `building_footprints` | `dtcc-core/demos/building_footprints.py` |
 | `roads` | `dtcc-core/demos/roads.py` |
 | `space_syntax` | `dtcc-core/demos/space_syntax.py` |
@@ -117,8 +117,8 @@ profile deploys concrete table artifacts.
 | `trees` | `dtcc-core/demos/trees.py` |
 | `terrain_surface_mesh` | `dtcc-core/demos/terrain_surface_mesh.py` |
 | `city_surface_mesh` | `dtcc-core/demos/city_meshes.py` |
-| `traffic_simulation_pb` | No duplicate core demo; simulation examples belong in `dtcc-sim`. |
-| `urban_heat_simulation_xdmf`, `urban_wind_simulation_pb` | No duplicate core demo; these require the explicit FEniCS environment in `dtcc-sim`. |
+| `traffic_simulation_dtcc` | No duplicate core demo; simulation examples belong in `dtcc-sim`. |
+| `urban_heat_simulation_xdmf`, `urban_wind_simulation_dtcc` | No duplicate core demo; these require the explicit FEniCS environment in `dtcc-sim`. |
 
 ## Responsibility
 

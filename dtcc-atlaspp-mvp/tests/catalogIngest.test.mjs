@@ -7,6 +7,21 @@ import { ingestManifests } from '../scripts/ingest-dtcc-manifests.mjs';
 
 const tempRoots = [];
 
+it.skipIf(!process.env.DTCC_CORE_CONTRACT_DIR)('imports the real canonical Core preview through the catalogue entry point', async () => {
+  const root = makeTempRoot();
+  const sourceDir = join(root, 'input');
+  const datasetsDir = join(root, 'datasets');
+  const catalogPath = join(datasetsDir, 'catalog.json');
+  mkdirSync(sourceDir);
+  writeFileSync(join(sourceDir, 'canonical.dtccpkg'), readFileSync(join(process.env.DTCC_CORE_CONTRACT_DIR, 'canonical.dtccpkg')));
+  const result = await ingestManifests({ sourceDir, datasetsDir, catalogPath });
+  expect(result.imported).toHaveLength(1);
+  const catalog = readJson(catalogPath);
+  expect(catalog.entries[0].title).toBe('Canonical raster contract fixture');
+  expect(catalog.entries[0].format).toBe('png');
+  expect(existsSync(join(datasetsDir, catalog.entries[0].file))).toBe(true);
+});
+
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });

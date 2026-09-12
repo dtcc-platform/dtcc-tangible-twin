@@ -24,7 +24,7 @@ def test_gbg_table_model_specs_validate():
     assert {
         "calibration_grid",
         "smoke_field_vtu",
-        "smoke_field_pb",
+        "smoke_field_dtcc",
         "smoke_slice_geojson",
         "smoke_streamlines_geojson",
         "smoke_slice",
@@ -42,9 +42,9 @@ def test_gbg_table_model_specs_validate():
         "trees",
         "terrain_surface_mesh",
         "city_surface_mesh",
-        "traffic_simulation_pb",
+        "traffic_simulation_dtcc",
         "urban_heat_simulation_xdmf",
-        "urban_wind_simulation_pb",
+        "urban_wind_simulation_dtcc",
     } <= ids
 
     by_id = {spec.id: spec for spec in datasets}
@@ -83,8 +83,8 @@ def test_gbg_table_model_specs_validate():
     assert by_id["trees"].table.tier == "core"
     assert by_id["terrain_surface_mesh"].export.renderer == "mesh_topdown"
     assert by_id["city_surface_mesh"].export.renderer == "mesh_topdown"
-    assert by_id["traffic_simulation_pb"].table.tier == "simulation"
-    assert "dtcc_sim.datasets" in by_id["traffic_simulation_pb"].table.required_python
+    assert by_id["traffic_simulation_dtcc"].table.tier == "simulation"
+    assert "dtcc_sim.datasets" in by_id["traffic_simulation_dtcc"].table.required_python
 
 
 def test_non_core_specs_have_tiers_and_reasons():
@@ -96,7 +96,7 @@ def test_non_core_specs_have_tiers_and_reasons():
         spec.id for spec in non_core if spec.table.tier == "dev"
     } >= {
         "smoke_field_vtu",
-        "smoke_field_pb",
+        "smoke_field_dtcc",
         "smoke_slice_geojson",
         "smoke_streamlines_geojson",
     }

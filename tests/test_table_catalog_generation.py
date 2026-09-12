@@ -228,7 +228,7 @@ class FakeSerializedArgs:
 
 class FakeSerializedDataset:
     def __call__(self, **params):
-        assert params["format"] == "pb"
+        assert params["format"] == "dtcc"
         return b"fake-protobuf-payload"
 
     def validate(self, params):
@@ -241,7 +241,7 @@ class FakeSerializedDataset:
             metadata=DatasetMetadata(
                 description="Original description",
                 crs=["EPSG:3006"],
-                formats=["pb"],
+                formats=["dtcc"],
                 data_types=["protobuf"],
                 result_kind="protobuf",
                 python_return_type="bytes",
@@ -322,7 +322,7 @@ def test_dry_run_validates_real_specs_without_creating_output(tmp_path):
     planned_ids = {item["id"] for item in report["planned"]}
     assert planned_ids == DEFAULT_MEDIA_IDS
     assert not any(
-        item.endswith(("_geojson", "_pb", "_obj")) for item in planned_ids
+        item.endswith(("_geojson", "_dtcc", "_obj")) for item in planned_ids
     )
     assert {item["tier"] for item in report["planned"]} == {"core"}
     planned_by_id = {item["id"]: item for item in report["planned"]}
@@ -338,10 +338,10 @@ def test_dry_run_validates_real_specs_without_creating_output(tmp_path):
     ]
     assert {item["id"] for item in report["skipped"]} >= {
         "smoke_field_vtu",
-        "smoke_field_pb",
+        "smoke_field_dtcc",
         "smoke_slice_geojson",
         "smoke_streamlines_geojson",
-        "traffic_simulation_pb",
+        "traffic_simulation_dtcc",
     }
 
 
@@ -572,23 +572,23 @@ def test_serialized_dataset_generation_writes_manifest_v2_package(tmp_path):
         "\n".join(
             [
                 "datasets:",
-                "  - id: fake_pb",
+                "  - id: fake_dtcc",
                 "    dataset: fake_serialized",
                 "    title: Fake Protobuf",
                 "    description: Fake generated protobuf package.",
                 "    params:",
-                "      format: pb",
+                "      format: dtcc",
                 "    export:",
-                "      format: pb",
-                "      filename: fake.pb",
-                "      media_type: application/x-protobuf",
-                "      data_kind: protobuf",
+                "      format: dtcc",
+                "      filename: fake.dtcc",
+                "      media_type: application/vnd.dtcc.model+protobuf",
+                "      data_kind: model",
                 "      crs: EPSG:3006",
                 "    table:",
                 "      tier: core",
                 "      role: overlay",
                 "      reason: Test serialized payload package generation.",
-                "      dataset_key_suffix: fake-pb",
+                "      dataset_key_suffix: fake-dtcc",
                 "      publish: true",
             ]
         )
@@ -608,13 +608,13 @@ def test_serialized_dataset_generation_writes_manifest_v2_package(tmp_path):
     manifest = _read_archive_json(archive_path, "manifest.json")
 
     with zipfile.ZipFile(archive_path) as archive:
-        assert archive.read("artifacts/fake.pb") == b"fake-protobuf-payload"
+        assert archive.read("artifacts/fake.dtcc") == b"fake-protobuf-payload"
     assert manifest["schema_version"] == "dtcc-dataset-manifest-v2"
     assert manifest["identity"]["title"] == "Fake Protobuf"
     assert manifest["metadata"]["description"] == "Fake generated protobuf package."
     assert manifest["request"]["bounds"] == [10.0, 20.0, 30.0, 40.0]
-    assert manifest["artifacts"][0]["path"] == "artifacts/fake.pb"
-    assert manifest["artifacts"][0]["media_type"] == "application/x-protobuf"
+    assert manifest["artifacts"][0]["path"] == "artifacts/fake.dtcc"
+    assert manifest["artifacts"][0]["media_type"] == "application/vnd.dtcc.model+protobuf"
     assert manifest["artifacts"][0]["data_kind"] == "protobuf"
     assert manifest["artifacts"][0]["crs"] == "EPSG:3006"
     assert manifest["artifacts"][0]["sha256"] == hashlib.sha256(
@@ -623,7 +623,7 @@ def test_serialized_dataset_generation_writes_manifest_v2_package(tmp_path):
     assert archive_path.is_file()
     assert _archive_names(archive_path) == {
         "manifest.json",
-        "artifacts/fake.pb",
+        "artifacts/fake.dtcc",
     }
 
 

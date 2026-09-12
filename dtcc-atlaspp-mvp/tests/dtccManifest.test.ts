@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deflateRawSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import {
   findManifestArtifact,
   isDtccManifestFile,
@@ -9,6 +11,40 @@ import {
   resolveDtccManifestFiles,
   resolveDtccPackageFiles,
 } from '../src/lib/dtccManifest';
+
+it.skipIf(!process.env.DTCC_CORE_CONTRACT_DIR)('opens the real Core canonical package and selects its PNG', async () => {
+  const bytes = readFileSync(`${process.env.DTCC_CORE_CONTRACT_DIR}/canonical.dtccpkg`);
+  const result = await resolveDtccPackageFiles([new File([new Uint8Array(bytes)], 'canonical.dtccpkg')]);
+  if (!result.ok) throw new Error(result.error);
+  expect(result.value[0].manifest.format).toBe('png');
+  expect(result.value[0].manifest.title).toBe('Canonical raster contract fixture');
+  expect(result.value[0].artifact).not.toBeNull();
+});
+
+it('verifies canonical artifact bytes for single and folder selections', async () => {
+  const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+  const manifest = {
+    schema_version: 'dtcc-dataset-manifest-v3',
+    identity: { name: 'canonical', title: 'Canonical' },
+    request: { bounds: [0, 0, 2, 2] },
+    artifacts: [
+      { path: 'artifacts/model.dtcc', role: 'canonical_model', format: 'dtcc',
+        media_type: 'application/vnd.dtcc.model+protobuf', data_kind: 'model',
+        model_type: 'Raster', model_schema_version: 6, size: 5, sha256: digest('model') },
+      { path: 'artifacts/preview.png', role: 'derived', derived_from: 'artifacts/model.dtcc',
+        format: 'png', media_type: 'image/png', data_kind: 'raster', size: 3, sha256: digest('png') },
+    ],
+  };
+  const files = [file('manifest.json', JSON.stringify(manifest)), file('model.dtcc', 'model'), file('preview.png', 'png')];
+  expect((await resolveDtccManifestFiles(files)).ok).toBe(true);
+  const corrupt = [files[0], file('model.dtcc', 'wrong'), files[2]];
+  const result = await resolveDtccManifestFiles(corrupt);
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.error).toContain('sha256');
+  expect((await resolveDtccManifestFolder(corrupt)).ok).toBe(false);
+  manifest.schema_version = 'dtcc-dataset-manifest-v999';
+  expect(parseDtccManifestText('manifest.json', JSON.stringify(manifest)).ok).toBe(false);
+});
 
 function file(name: string, contents: string, type = ''): File {
   return new File([contents], name, { type });

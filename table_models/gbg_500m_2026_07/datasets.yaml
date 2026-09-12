@@ -139,7 +139,7 @@ datasets:
       publish: false
       skip_reason: Local reference artifact; generated only for development inspection.
 
-  - id: smoke_field_pb
+  - id: smoke_field_dtcc
     dataset: smoke
     title: Smoke Field Protobuf
     description: Local-only synthetic smoke protobuf package for Dataset v2 serialization checks; not a physical CFD result.
@@ -147,15 +147,15 @@ datasets:
       product: field
       resolution: 17
     export:
-      format: pb
-      filename: smoke_field.pb
-      media_type: application/x-protobuf
-      data_kind: protobuf
+      format: dtcc
+      filename: smoke_field.dtcc
+      media_type: application/vnd.dtcc.model+protobuf
+      data_kind: model
     table:
       tier: dev
       role: local_reference
       reason: Exercises protobuf package generation and manifest validation for a deterministic volume dataset.
-      dataset_key_suffix: smoke-field-pb
+      dataset_key_suffix: smoke-field-dtcc
       publish: false
       skip_reason: Local reference artifact; generated only for development inspection.
 
@@ -499,24 +499,24 @@ datasets:
       required_env:
         - VASTTRAFIK_AUTHENTICATION_KEY
 
-  - id: traffic_simulation_pb
+  - id: traffic_simulation_dtcc
     dataset: traffic_simulation
     title: Traffic Simulation Protobuf
     description: Static synthetic traffic assignment over roads and DeSO demand; useful for UX exploration but not calibrated counts.
     params:
       max_iterations: 20
-      format: pb
+      format: dtcc
     export:
-      format: pb
-      filename: traffic_simulation.pb
-      media_type: application/x-protobuf
-      data_kind: protobuf
+      format: dtcc
+      filename: traffic_simulation.dtcc
+      media_type: application/vnd.dtcc.model+protobuf
+      data_kind: model
       crs: EPSG:3006
     table:
       tier: simulation
       role: simulation_network
       reason: Exercises simulation-themed network attributes and non-calibrated-model warnings when dtcc-sim is installed.
-      dataset_key_suffix: traffic-simulation-pb
+      dataset_key_suffix: traffic-simulation-dtcc
       publish: true
       requires_network: true
       required_python:
@@ -550,7 +550,7 @@ datasets:
         - petsc4py
       skip_reason: Requires FEniCSx/dolfinx and is too expensive for default or dev generation.
 
-  - id: urban_wind_simulation_pb
+  - id: urban_wind_simulation_dtcc
     dataset: urban_wind_simulation
     title: Urban Wind Simulation Protobuf
     description: Expensive FEniCS urban wind scenario field for local CFD/table artifact experiments.
@@ -559,18 +559,18 @@ datasets:
       mode: steady
       mesh_max_mesh_size: 25.0
       mesh_domain_height: 80.0
-      format: pb
+      format: dtcc
     export:
-      format: pb
-      filename: urban_wind_simulation.pb
-      media_type: application/x-protobuf
-      data_kind: protobuf
+      format: dtcc
+      filename: urban_wind_simulation.dtcc
+      media_type: application/vnd.dtcc.model+protobuf
+      data_kind: model
       crs: EPSG:3006
     table:
       tier: expensive
       role: simulation_field
       reason: Exercises CFD field presentation only in an explicit FEniCS runtime with manual runtime acceptance.
-      dataset_key_suffix: urban-wind-simulation-pb
+      dataset_key_suffix: urban-wind-simulation-dtcc
       publish: false
       required_python:
         - dtcc_sim.datasets

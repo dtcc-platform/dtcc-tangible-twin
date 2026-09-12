@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
+import { CANONICAL_VERSION, validatePackageManifest, verifyCanonicalArtifacts } from '../src/lib/datasetPackage.mjs';
 
 const MANIFEST_V2_SCHEMA_VERSION = 'dtcc-dataset-manifest-v2';
 const ZIP_LOCAL_FILE_HEADER = 0x04034b50;
@@ -121,10 +122,15 @@ async function readCatalog(catalogPath) {
   return catalog;
 }
 
-function parseManifest(manifestPath, manifest, datasetsDir) {
+async function parseManifest(manifestPath, manifest, datasetsDir) {
   if (!isRecord(manifest)) throw new Error(`${manifestPath} must contain a JSON object`);
-  if (manifest.schema_version === MANIFEST_V2_SCHEMA_VERSION) {
-    return parseDatasetManifestV2({
+  if (manifest.schema_version === MANIFEST_V2_SCHEMA_VERSION || manifest.schema_version === CANONICAL_VERSION) {
+    await verifyCanonicalArtifacts(manifest, path => {
+      const target = resolve(dirname(manifestPath), path);
+      if (statSync(target).size > 256 * 1024 * 1024) throw new Error('Canonical artifact exceeds size limits');
+      return readFile(target);
+    });
+    return parseDatasetManifest({
       manifestPath,
       manifest,
       datasetsDir,
@@ -198,7 +204,8 @@ function parseManifest(manifestPath, manifest, datasetsDir) {
   };
 }
 
-function parseDatasetManifestV2({ manifestPath, manifest, datasetsDir, packageId, artifactResolver }) {
+function parseDatasetManifest({ manifestPath, manifest, datasetsDir, packageId, artifactResolver }) {
+  validatePackageManifest(manifest);
   const artifacts = manifest.artifacts;
   if (!Array.isArray(artifacts) || artifacts.length === 0) {
     throw new Error(`${manifestPath} Dataset Manifest v2 must include non-empty artifacts`);
@@ -304,13 +311,31 @@ function parseDatasetManifestV2({ manifestPath, manifest, datasetsDir, packageId
 }
 
 async function parsePackage(packagePath, datasetsDir) {
+  if (statSync(packagePath).size > 256 * 1024 * 1024) throw new Error('Package exceeds size limits');
   const bytes = await readFile(packagePath);
   const entries = readZipEntries(bytes, packagePath);
+  if (bytes.byteLength > 256 * 1024 * 1024 || entries.length > 10000 ||
+      new Set(entries.map(e => e.name)).size !== entries.length ||
+      entries.reduce((sum, entry) => sum + entry.uncompressedSize, 0) > 256 * 1024 * 1024) {
+    throw new Error('Package has duplicate members or exceeds size limits');
+  }
   const byName = new Map(entries.map((entry) => [entry.name, entry]));
   const manifestEntry = byName.get('manifest.json');
   if (!manifestEntry) throw new Error(`${packagePath} is missing manifest.json`);
   const manifest = JSON.parse(readZipEntry(bytes, manifestEntry, packagePath).toString('utf8'));
-  return parseDatasetManifestV2({
+  validatePackageManifest(manifest);
+  if (manifest.schema_version === CANONICAL_VERSION) {
+    const expected = new Set(['manifest.json', ...manifest.artifacts.map(a => a.path)]);
+    if (entries.length !== expected.size || entries.some(entry => !expected.has(entry.name))) {
+      throw new Error('Canonical archive members must match the manifest exactly');
+    }
+  }
+  await verifyCanonicalArtifacts(manifest, path => {
+    const entry = byName.get(path);
+    if (!entry) throw new Error(`Missing canonical package artifact: ${path}`);
+    return readZipEntry(bytes, entry, packagePath);
+  });
+  return parseDatasetManifest({
     manifestPath: `${packagePath}!/manifest.json`,
     manifest,
     datasetsDir,
@@ -391,7 +416,7 @@ function readZipEntry(bytes, entry, packagePath) {
   if (entry.compressionMethod !== ZIP_DEFLATED) {
     throw new Error(`${packagePath} uses unsupported ZIP compression for ${entry.name}`);
   }
-  const inflated = inflateRawSync(compressed);
+  const inflated = inflateRawSync(compressed, { maxOutputLength: Math.max(1, entry.uncompressedSize) });
   if (inflated.byteLength !== entry.uncompressedSize) {
     throw new Error(`${packagePath} has an invalid deflated size for ${entry.name}`);
   }
@@ -427,7 +452,7 @@ export async function ingestManifests({ sourceDir, datasetsDir, catalogPath }) {
   for (const inputPath of inputPaths) {
     const parsed = inputPath.endsWith('.dtccpkg')
       ? await parsePackage(inputPath, resolvedDatasetsDir)
-      : parseManifest(inputPath, await readJson(inputPath), resolvedDatasetsDir);
+      : await parseManifest(inputPath, await readJson(inputPath), resolvedDatasetsDir);
     if (parsed.skipped) {
       skipped.push(parsed.skipped);
       continue;

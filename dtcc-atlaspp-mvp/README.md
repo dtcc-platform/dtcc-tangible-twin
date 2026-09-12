@@ -1,5 +1,13 @@
 # DTCC Atlas++ MVP
 
+Canonical Dataset Manifest v3 packages are supported by the catalogue importer,
+local browser import, and online preview selection. Package imports verify all
+artifact sizes and hashes; online viewing verifies the selected preview. Native
+`.dtcc` artifacts remain model data rather than projector images. A package needs
+a PNG, MP4 or GeoJSON derivative for display. Browser SHA-256 verification requires
+HTTPS or localhost. Existing artifact-oriented v2 packages remain supported.
+
+
 Standalone web app that projects EPSG:3006 (SWEREF99 TM) GeoJSONs onto a 3 m × 3 m 3D-printed Gothenburg city model via a calibrated overhead projector.
 
 - **Design spec:** `../docs/superpowers/specs/2026-04-22-dtcc-atlaspp-mvp-design.md`

@@ -1,4 +1,6 @@
 import type { Bbox } from './storage';
+import { parseDtccManifestText } from './dtccManifest';
+import { CANONICAL_VERSION, validatePackageManifest, verifyArtifact } from './datasetPackage.mjs';
 
 export type OnlineCatalogResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -93,7 +95,7 @@ export function fetchOnlineVersionDetailUrl(baseUrl: string, entry: OnlineCatalo
   return new URL(`v1/datasets/${encodedPath(entry.datasetKey)}/versions/${encodedPath(entry.versionId)}`, `${baseUrl}/`);
 }
 
-export function fetchOnlineManifestUrl(baseUrl: string, entry: OnlineCatalogEntry): URL {
+export function fetchOnlineManifestUrl(baseUrl: string, entry: Pick<OnlineCatalogEntry, 'datasetKey' | 'versionId'>): URL {
   return new URL(
     `v1/datasets/${encodedPath(entry.datasetKey)}/versions/${encodedPath(entry.versionId)}/manifest`,
     `${baseUrl}/`
@@ -196,7 +198,25 @@ export async function fetchOnlineCatalog(settings: OnlineCatalogSettings): Promi
     if (!response.ok) {
       return { ok: false, error: `online catalog fetch failed (${responseStatus(response)})` };
     }
-    return parseOnlineCatalogResponse(await response.json());
+    const payload: unknown = await response.json();
+    if (isRecord(payload) && Array.isArray(payload.items)) {
+      // Canonical rows describe their native model. Read the small manifest to
+      // discover a preview, without downloading model arrays during browsing.
+      for (let index = 0; index < payload.items.length; index += 1) {
+        const row = payload.items[index];
+        if (!isRecord(row) || row.format !== 'dtcc' || typeof row.dataset_key !== 'string' || typeof row.version_id !== 'string') continue;
+        const manifestResponse = await fetch(fetchOnlineManifestUrl(settings.baseUrl, {
+          datasetKey: row.dataset_key, versionId: row.version_id,
+        }), { headers: authHeaders(settings) });
+        if (!manifestResponse.ok) return { ok: false, error: `online manifest fetch failed (${responseStatus(manifestResponse)})` };
+        const parsed = parseDtccManifestText('online manifest', await manifestResponse.text());
+        if (!parsed.ok) continue; // Native-only packages have no projector view.
+        payload.items[index] = { ...row, format: parsed.value.format, media_type: parsed.value.mediaType,
+          data_kind: parsed.value.kind === 'image' ? 'raster' : parsed.value.kind === 'geojson' ? 'vector' : 'video',
+          bounds_json: JSON.stringify(parsed.value.bounds) };
+      }
+    }
+    return parseOnlineCatalogResponse(payload);
   } catch (err) {
     return { ok: false, error: `online catalog request failed: ${(err as Error).message}` };
   }
@@ -255,14 +275,25 @@ export function findOnlineArtifactPath(files: OnlineFileRecord[], manifestFile: 
 export async function fetchOnlineArtifactBlob(
   settings: OnlineCatalogSettings,
   entry: OnlineCatalogEntry,
-  path: string
+  path: string,
+  manifestText?: string,
 ): Promise<OnlineCatalogResult<Blob>> {
   try {
     const response = await fetch(fetchOnlineArtifactUrl(settings.baseUrl, entry, path), { headers: authHeaders(settings) });
     if (!response.ok) {
       return { ok: false, error: `online artifact fetch failed (${responseStatus(response)})` };
     }
-    return { ok: true, value: await response.blob() };
+    const blob = await response.blob();
+    if (manifestText) {
+      const manifest = JSON.parse(manifestText);
+      if (manifest.schema_version === CANONICAL_VERSION) {
+        validatePackageManifest(manifest);
+        const artifact = manifest.artifacts.find((item: { path: string }) => item.path === path);
+        if (!artifact) throw new Error('Requested artifact is missing from the manifest');
+        await verifyArtifact(artifact, new Uint8Array(await blob.arrayBuffer()));
+      }
+    }
+    return { ok: true, value: blob };
   } catch (err) {
     return { ok: false, error: `online catalog request failed: ${(err as Error).message}` };
   }

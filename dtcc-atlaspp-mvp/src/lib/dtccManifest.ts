@@ -1,4 +1,5 @@
 import type { Bbox } from './storage';
+import { CANONICAL_VERSION, validatePackageManifest, verifyCanonicalArtifacts } from './datasetPackage.mjs';
 
 export type ManifestInputResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -108,7 +109,7 @@ function formatName(manifest: Record<string, unknown>): string {
 }
 
 function parseVisualizationMetadata(value: unknown, manifestPath: string): ManifestInputResult<ManifestVisualization | undefined> {
-  if (value === undefined) return { ok: true, value: undefined };
+  if (value === undefined || value === null) return { ok: true, value: undefined };
   if (!isRecord(value)) return { ok: false, error: `${manifestPath} visualization must be an object when present` };
 
   const out: ManifestVisualization = {};
@@ -171,8 +172,13 @@ export function parseDtccManifestText(manifestPath: string, text: string): Manif
     return { ok: false, error: `JSON parse error: ${(err as Error).message}` };
   }
   if (!isRecord(parsed)) return { ok: false, error: `${manifestPath} must contain a JSON object` };
-  if (parsed.schema_version === MANIFEST_V2_SCHEMA_VERSION) {
-    return parseDatasetManifestV2(manifestPath, parsed);
+  if (parsed.schema_version === MANIFEST_V2_SCHEMA_VERSION || parsed.schema_version === CANONICAL_VERSION) {
+    try {
+      validatePackageManifest(parsed);
+      return parseDatasetManifest(manifestPath, parsed);
+    } catch (error) {
+      return { ok: false, error: `${manifestPath}: ${(error as Error).message}` };
+    }
   }
   if (parsed.schema_version !== undefined || parsed.artifacts !== undefined || parsed.identity !== undefined) {
     return { ok: false, error: `${manifestPath} Dataset Manifest v2 must declare schema_version ${MANIFEST_V2_SCHEMA_VERSION}` };
@@ -212,7 +218,7 @@ export function parseDtccManifestText(manifestPath: string, text: string): Manif
   };
 }
 
-function parseDatasetManifestV2(manifestPath: string, manifest: Record<string, unknown>): ManifestInputResult<DtccManifest> {
+function parseDatasetManifest(manifestPath: string, manifest: Record<string, unknown>): ManifestInputResult<DtccManifest> {
   const artifacts = manifest.artifacts;
   if (!Array.isArray(artifacts) || artifacts.length === 0) {
     return { ok: false, error: `${manifestPath} Dataset Manifest v2 must include non-empty artifacts` };
@@ -322,6 +328,33 @@ export function findManifestArtifact(files: File[], manifest: DtccManifest, mani
   return files.find((file) => !isDtccManifestFile(file) && file.name === manifest.artifactName) ?? null;
 }
 
+async function verifyManifestFiles(manifestFile: File, files: File[]): Promise<ManifestInputResult<void>> {
+  try {
+    const raw = JSON.parse(await manifestFile.text());
+    if (raw.schema_version === CANONICAL_VERSION) {
+      const byPath = new Map<string, File[]>();
+      const byName = new Map<string, File[]>();
+      for (const file of files) {
+        const relative = fileRelativePath(file);
+        const index = relative ? byPath : byName;
+        const key = relative ?? file.name;
+        index.set(key, [...(index.get(key) ?? []), file]);
+      }
+      await verifyCanonicalArtifacts(raw, async (path) => {
+        const manifestPath = fileRelativePath(manifestFile);
+        const expected = manifestPath ? joinRelativePath(dirname(manifestPath), path) : path;
+        const matches = byPath.get(expected) ?? (!manifestPath ? byName.get(basename(path)) : undefined) ?? [];
+        if (matches.length !== 1) throw new Error(`Missing or ambiguous canonical artifact: ${path}`);
+        if (matches[0].size > 256 * 1024 * 1024) throw new Error('Canonical artifact exceeds size limits');
+        return new Uint8Array(await matches[0].arrayBuffer());
+      });
+    }
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
 export async function resolveDtccManifestFiles(files: File[]): Promise<ManifestInputResult<DtccManifestFileSelection>> {
   if (files.some(isDtccPackageFile)) {
     const packages = await resolveDtccPackageFiles(files);
@@ -335,6 +368,9 @@ export async function resolveDtccManifestFiles(files: File[]): Promise<ManifestI
 
   const manifest = await readDtccManifestFile(manifestFile);
   if (!manifest.ok) return manifest;
+
+  const verified = await verifyManifestFiles(manifestFile, files);
+  if (!verified.ok) return verified;
 
   const artifact = findManifestArtifact(files, manifest.value, manifestFile);
   return {
@@ -374,6 +410,8 @@ export async function resolveDtccManifestFolder(files: File[]): Promise<Manifest
       return manifest;
     }
 
+    const verified = await verifyManifestFiles(manifestFile, files);
+    if (!verified.ok) return verified;
     const manifestPath = fileRelativePath(manifestFile);
     const artifact = findManifestArtifact(files, manifest.value, manifestFile);
     const expectedPath = manifestArtifactPath(manifestFile, manifest.value) ?? manifest.value.file;
@@ -393,10 +431,15 @@ export async function resolveDtccManifestFolder(files: File[]): Promise<Manifest
 }
 
 async function extractDtccPackage(packageFile: File): Promise<ManifestInputResult<File[]>> {
+  if (packageFile.size > 256 * 1024 * 1024) return { ok: false, error: 'Package exceeds 256 MiB limit' };
   const bytes = new Uint8Array(await packageFile.arrayBuffer());
   const entries = readZipEntries(bytes, packageFile.name);
   if (!entries.ok) return entries;
 
+  if (entries.value.length > 10000 || new Set(entries.value.map(e => e.name)).size !== entries.value.length ||
+      entries.value.reduce((sum, entry) => sum + entry.uncompressedSize, 0) > 256 * 1024 * 1024) {
+    return { ok: false, error: 'Package has duplicate members or exceeds size limits' };
+  }
   const files: File[] = [];
   for (const entry of entries.value) {
     if (!isSafeRelativeFile(entry.name)) {
@@ -407,7 +450,20 @@ async function extractDtccPackage(packageFile: File): Promise<ManifestInputResul
     files.push(fileFromPackageMember(packageFile.name, entry.name, data.value));
   }
 
-  if (!files.some(isDtccManifestFile)) return { ok: false, error: `${packageFile.name} does not contain manifest.json` };
+  const manifestFile = files.find(file => file.name === 'manifest.json');
+  if (!manifestFile) return { ok: false, error: `${packageFile.name} does not contain manifest.json` };
+  try {
+    const manifest = JSON.parse(await manifestFile.text());
+    if (manifest.schema_version === CANONICAL_VERSION) {
+      validatePackageManifest(manifest);
+      const expected = new Set(['manifest.json', ...manifest.artifacts.map((a: { path: string }) => a.path)]);
+      if (entries.value.length !== expected.size || entries.value.some(entry => !expected.has(entry.name))) {
+        return { ok: false, error: 'Canonical archive members must match the manifest exactly' };
+      }
+    }
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
   return { ok: true, value: files };
 }
 
@@ -490,7 +546,26 @@ async function readZipEntry(
     return { ok: false, error: 'this browser cannot open compressed .dtccpkg archives' };
   }
   const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-  const inflated = new Uint8Array(await new Response(stream).arrayBuffer());
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > entry.uncompressedSize) {
+        await reader.cancel();
+        return { ok: false, error: `${packageName} exceeds declared size for ${entry.name}` };
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    return { ok: false, error: `${packageName} cannot decompress ${entry.name}: ${(error as Error).message}` };
+  }
+  const inflated = new Uint8Array(size);
+  let writeOffset = 0;
+  for (const chunk of chunks) { inflated.set(chunk, writeOffset); writeOffset += chunk.byteLength; }
   if (inflated.byteLength !== entry.uncompressedSize) {
     return { ok: false, error: `${packageName} has an invalid deflated size for ${entry.name}` };
   }

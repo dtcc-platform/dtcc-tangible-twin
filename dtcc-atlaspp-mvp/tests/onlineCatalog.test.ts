@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import {
   clearOnlineCatalogSettings,
   fetchOnlineArtifactBlob,
@@ -177,7 +178,7 @@ describe('parseOnlineCatalogResponse', () => {
 
   it('returns an empty supported-list error when no supported rows remain', () => {
     const result = parseOnlineCatalogResponse({
-      items: [{ ...baseRow, format: 'pb', media_type: 'application/octet-stream', data_kind: 'binary' }],
+      items: [{ ...baseRow, format: 'dtcc', media_type: 'application/vnd.dtcc.model+protobuf', data_kind: 'model' }],
       next_cursor: null,
     });
 
@@ -196,6 +197,33 @@ describe('parseOnlineCatalogResponse', () => {
 });
 
 describe('online catalog network helpers', () => {
+  it('discovers a canonical preview and rejects a corrupted downloaded artifact', async () => {
+    const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+    const manifest = {
+      schema_version: 'dtcc-dataset-manifest-v3', identity: { name: 'test', title: 'Test' },
+      request: { bounds: [0, 0, 1, 1] }, artifacts: [
+        { path: 'artifacts/model.dtcc', role: 'canonical_model', format: 'dtcc',
+          media_type: 'application/vnd.dtcc.model+protobuf', data_kind: 'model',
+          model_type: 'Raster', model_schema_version: 6, size: 5, sha256: digest('model') },
+        { path: 'artifacts/preview.png', role: 'derived', derived_from: 'artifacts/model.dtcc',
+          format: 'png', media_type: 'image/png', data_kind: 'raster', size: 3, sha256: digest('png') },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url) => String(url).endsWith('/manifest')
+      ? new Response(JSON.stringify(manifest))
+      : new Response(JSON.stringify({ items: [{ ...baseRow, format: 'dtcc', data_kind: 'model' }] }))));
+    const settings = { baseUrl: 'https://example.test', token: 'test-token' };
+    const listed = await fetchOnlineCatalog(settings);
+    if (!listed.ok) throw new Error(listed.error);
+    expect(listed.value[0].format).toBe('png');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('png')));
+    expect((await fetchOnlineArtifactBlob(settings, listed.value[0], 'artifacts/preview.png', JSON.stringify(manifest))).ok).toBe(true);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('bad')));
+    const invalid = await fetchOnlineArtifactBlob(settings, listed.value[0], 'artifacts/preview.png', JSON.stringify(manifest));
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.error).toContain('sha256');
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
